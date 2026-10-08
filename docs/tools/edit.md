@@ -31,6 +31,7 @@ This page primarily documents hashline. The schema, prompt, examples, renderer, 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `input` | `string` | Yes | One or more `[PATH#TAG]` sections containing hashline operations. The strict custom-tool grammar wraps the sections in `*** Begin Patch` / `*** End Patch`; the normal parser also accepts an unwrapped payload. |
+| `title` | `string` | No | Short reason for the edit in the user's language. Explain why the change is needed, rather than merely naming the operation. Available in JSON calls for every edit mode. |
 
 Each section edits one existing file and MUST copy the four-uppercase-hex snapshot tag from the latest anchored `read`, `grep`, or successful `edit` result:
 
@@ -41,6 +42,23 @@ PUT 4.=4:
 ```
 
 Use `write` to create or wholly overwrite a file. Hashline rejects untagged anchored edits at application time.
+
+### Displaying the reason for an edit
+
+JSON calls can provide `title` before the edit payload. Custom freeform calls instead accept an optional first line, before the existing patch content:
+
+```text
+*** Reason: Prevent retries from continuing after the token expires
+*** Begin Patch
+[src/example.ts#1A2B]
+PUT 4.=4:
++const value = 2;
+*** End Patch
+```
+
+The same prefix works before `*** Edit File` in `sloppy` mode. The reason is display-only: it is removed before native inspection, streaming previews, and execution, and is never written to the target file. A nonblank JSON `title` takes display precedence over a reason prefix inside `input`.
+
+Reasons remain visible in pending and completed edit cards, errors, compact activity summaries, and restored transcripts. Untitled calls keep their existing presentation. The model is instructed to supply a concise purpose in the user's language; this is not a UI-generated explanation of the diff.
 
 ## Canonical patch language
 

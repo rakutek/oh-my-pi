@@ -9,6 +9,7 @@ export const editFixtures: Record<string, GalleryFixture> = {
 		// harness diff strategy skips `{ file_path, previewDiff }` (no `path`/`edits`),
 		// so the canned diff survives the streaming and progress states.
 		streamingArgs: {
+			title: "Keep read limits measured in lines rather than characters",
 			file_path: "packages/coding-agent/src/tools/read.ts",
 			previewDiff: [
 				"@@ -88,3 +88,4 @@",
@@ -18,6 +19,7 @@ export const editFixtures: Record<string, GalleryFixture> = {
 			].join("\n"),
 		},
 		args: {
+			title: "Keep read limits measured in lines rather than characters",
 			file_path: "packages/coding-agent/src/tools/read.ts",
 			previewDiff: [
 				"@@ -88,5 +88,6 @@",

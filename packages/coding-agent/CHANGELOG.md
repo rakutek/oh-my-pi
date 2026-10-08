@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Edit calls can explain why a change is needed using a JSON `title` or a leading `*** Reason:` line in freeform patches, shown during editing and in the resulting diff.
+
 ### Fixed
 
 - Fixed `omp usage` reporting an account exactly at its reserve (e.g. 30% left with a 30% reserve) as eligible instead of inside reserve ([#14765](https://github.com/can1357/oh-my-pi/pull/14765) by [@will-bogusz](https://github.com/will-bogusz))

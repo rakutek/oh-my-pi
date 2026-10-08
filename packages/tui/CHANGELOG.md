@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Edit cards and compact activity rows show the supplied change reason across streaming, completion, errors, and native views.
+
 ## [18.8.4] - 2026-10-08
 
 ### Changed

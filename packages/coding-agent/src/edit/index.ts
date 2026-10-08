@@ -52,6 +52,8 @@ import { resolveEditMode } from "../utils/edit-mode";
 import { attemptEditAutoRepair, type EditAutoRepairOutcome } from "./auto-repair";
 import { type AppliedEditSnapshot, createEditBlackboxRecorder } from "./blackbox";
 import hashlineCompactPrompt from "./hashline-compact.md" with { type: "text" };
+import reasonDescriptionPrompt from "./reason-description.md" with { type: "text" };
+import { EditReasonStream, JsonEditReasonStream, stripEditReasonArgs } from "./reason-stream";
 import { getLspBatchRequest } from "../lsp/batch";
 import { type EditToolDetails, type EditToolPerFileResult, type Operation } from "@oh-my-pi/pi-tui/tools/edit";
 import {
@@ -163,7 +165,7 @@ export function resolveEditToolDescription(
 		model?.editPromptVariant === "compact"
 			? (editDescriptionCompact(mode) ?? editDescription(mode))
 			: editDescription(mode);
-	return prompt.render(source);
+	return prompt.render(reasonDescriptionPrompt, { description: prompt.render(source) });
 }
 
 /** Builds the LSP writethrough from the current `lsp.*` settings; called per write so changes apply immediately. */
@@ -369,7 +371,15 @@ export class EditTool implements AgentTool<TInput> {
 
 	get customFormat(): { syntax: "lark"; definition: string } | undefined {
 		const definition = editGrammar(this.mode);
-		return definition === null ? undefined : { syntax: "lark", definition };
+		return definition === null
+			? undefined
+			: {
+					syntax: "lark",
+					definition: definition.replace(
+						/^start:/m,
+						'start: edit_reason? edit_payload\nedit_reason: "*** Reason: " /[^\\r\\n]+/ LF\nedit_payload:',
+					),
+				};
 	}
 
 	get customWireName(): string | undefined {
@@ -442,8 +452,16 @@ export class EditTool implements AgentTool<TInput> {
 			this.#sessions.delete(oldestId);
 			this.#streamedArgs.delete(oldestId);
 		}
+		const reasonStream = rawInput
+			? new EditReasonStream()
+			: this.mode === "replace" || this.mode === "patch"
+				? undefined
+				: new JsonEditReasonStream();
 		return {
-			push: delta => editSession.push(delta),
+			push: delta => {
+				const payload = reasonStream ? reasonStream.push(delta) : delta;
+				if (payload) editSession.push(payload);
+			},
 			end: args => {
 				editSession.finish();
 				this.#streamedArgs.set(init.toolCallId, JSON.stringify(args));
@@ -480,7 +498,8 @@ export class EditTool implements AgentTool<TInput> {
 			// Cursor batch frames), or a pre-execution hook revised the arguments:
 			// the parsed args are the whole effective payload.
 			open = this.#openSession(false, signal);
-			open.native.setArgsJson(argsJson);
+			const nativeParams = stripEditReasonArgs(params);
+			open.native.setArgsJson(nativeParams === params ? argsJson : JSON.stringify(nativeParams));
 			open.native.finish();
 		}
 		const editSession = open.native;
@@ -564,7 +583,7 @@ export class EditTool implements AgentTool<TInput> {
 		if (cached?.mode === this.mode) return cached.inspection;
 		let inspection: EditInspection;
 		try {
-			inspection = editInspect(this.mode, JSON.stringify(args ?? {}));
+			inspection = editInspect(this.mode, JSON.stringify(stripEditReasonArgs(args ?? {})));
 		} catch {
 			inspection = { paths: [], entries: [], fileOps: [] };
 		}

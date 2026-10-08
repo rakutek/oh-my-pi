@@ -60,6 +60,87 @@ describe("editToolRenderer", () => {
 		expect(rendered).toContain("packages/coding-agent/src/edit/renderer.ts");
 	});
 
+	it("keeps Unicode reasons on one bounded row across pending, error, inline, and multi-file cards", async () => {
+		const uiTheme = await getUiTheme();
+		const title = `理由\t\n\x1b[2J安全\x07 ${"日本語の目的".repeat(30)}`;
+		const args = { path: "a.ts", title };
+		const options = { expanded: false, isPartial: false };
+		const components = [
+			editToolRenderer.renderCall(args, { ...options, isPartial: true }, uiTheme),
+			editToolRenderer.renderResult(
+				{ content: [], details: { path: "a.ts", diff: "-1|old\n+1|new" } },
+				options,
+				uiTheme,
+				args,
+			),
+			editToolRenderer.renderResult(
+				{ content: [{ type: "text", text: "conflict" }], isError: true },
+				options,
+				uiTheme,
+				args,
+			),
+			editToolRenderer.renderCall({ ...args, op: "delete" }, { ...options, isPartial: true }, uiTheme),
+			editToolRenderer.renderResult(
+				{ content: [], details: { path: "b.ts", sourcePath: "a.ts", move: "b.ts", diff: "" } },
+				options,
+				uiTheme,
+				{ ...args, rename: "b.ts" },
+			),
+			editToolRenderer.renderResult(
+				{
+					content: [],
+					details: {
+						diff: "",
+						perFileResults: [
+							{ path: "a.ts", diff: "-1|old\n+1|new" },
+							{ path: "b.ts", diff: "-1|old\n+1|new" },
+						],
+					},
+				},
+				options,
+				uiTheme,
+				args,
+			),
+		];
+		for (const component of components) {
+			for (const width of [40, 80]) {
+				const lines = component.render(width);
+				const plain = lines.map(line => Bun.stripANSI(line));
+				expect(plain.filter(line => line.includes("理由 安全"))).toHaveLength(1);
+				expect(plain.join("\n")).toContain("a.ts");
+				expect(lines.join("\n")).not.toContain("\x1b[2J");
+				expect(plain.join("\n")).not.toMatch(/[\x07\t]/);
+				for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+			}
+		}
+	});
+
+	it("preserves the reason and edit targets when a raw reason-only stream becomes a patch and then a result", async () => {
+		const uiTheme = await getUiTheme();
+		const reason = 'Keep "path": "decoy.ts" consistent';
+		const options = { expanded: false, isPartial: true, renderContext: { editMode: "apply_patch" as const } };
+		const prefix = `*** Reason: ${reason}`;
+		const input = `${prefix}\n*** Begin Patch\n*** Delete File: a.ts\n*** End Patch`;
+		const pending = editToolRenderer.describeCall({ input: prefix, __partialJson: prefix }, options);
+		expect(pending.tool?.title).toContain(reason);
+		expect(pending.tone).toBeUndefined();
+		expect(pending.tool?.target).toBeUndefined();
+		expect(pending.body).toEqual([]);
+		const streamed = editToolRenderer.describeCall({ input, __partialJson: input }, options);
+		expect(streamed.tool?.target).toBe("a.ts");
+		expect(streamed.tool?.title).toContain(reason);
+		expect(streamed.tone).toBeUndefined();
+		const component = editToolRenderer.renderResult(
+			{ content: [], details: { path: "a.ts", op: "delete", diff: "" } },
+			{ ...options, isPartial: false },
+			uiTheme,
+			{ input },
+		);
+		const rendered = Bun.stripANSI(component.render(80).join("\n"));
+		expect(rendered).toContain(reason);
+		expect(rendered).toContain("a.ts");
+	});
+
 	it("windows the expanded streaming diff to the viewport tail", async () => {
 		const uiTheme = await getUiTheme();
 		// Pin a tall viewport so previewWindowRows() (rows - reserve) lands at 30:

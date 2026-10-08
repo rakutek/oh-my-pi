@@ -16,7 +16,7 @@ const STREAMING_STRING_KEYS_BY_TOOL: Record<string, readonly string[]> = {
 	// write.content also carries xd:// device args (a JSON string) — the same
 	// incremental decode feeds the delegated tool renderer live inner args.
 	write: ["content"],
-	edit: ["input", "_input"],
+	edit: ["title", "input", "_input"],
 	eval: ["code"],
 };
 

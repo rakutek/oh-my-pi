@@ -45,6 +45,7 @@ import type { ToolActivityContext, ToolActivitySummary } from "./renderer";
 import { fileHyperlink, Hasher, type RenderCache, renderStatusLine, truncateToWidth, WidthAwareText } from "../render";
 import { framedToolCard } from "../render/tool-card";
 import { HL_FILE_PREFIX, HL_FILE_SUFFIX, HL_MOVE_KEYWORD, HL_REM_KEYWORD } from "./hashline-format";
+import { getEditReason, stripEditReason } from "./edit-reason";
 
 /** Edit payload syntax selected by the caller. */
 export type EditMode = "replace" | "patch" | "hashline" | "apply_patch" | "sloppy";
@@ -133,6 +134,7 @@ type InspectedInput = { mode: EditMode; input: string } & (
 );
 
 interface EditRenderArgs {
+	title?: string;
 	path?: unknown;
 	file_path?: unknown;
 	oldText?: string;
@@ -217,6 +219,15 @@ function previewCacheAt(caches: RenderedStringCache[] | undefined, index: number
 const CALL_TEXT_PREVIEW_LINES = 6;
 const CALL_TEXT_PREVIEW_WIDTH = 80;
 
+function getDisplayEditReason(args: EditRenderArgs | undefined): string | undefined {
+	const reason = getEditReason(args ?? {});
+	return reason ? sanitizeText(reason).replace(/\s+/g, " ").trim() || undefined : undefined;
+}
+
+function renderEditReason(reason: string, width: number, uiTheme: Theme): string {
+	return uiTheme.fg("toolTitle", truncateToWidth(reason, Math.max(1, width)));
+}
+
 /** Render replacement text until a computed diff preview is available. */
 export function renderStreamingFallback(editMode: EditMode, args: unknown, theme: Theme): string {
 	if (editMode !== "replace" || !args || typeof args !== "object") return "";
@@ -258,7 +269,7 @@ const PARTIAL_JSON_PATH_RE = /"path"\s*:\s*"((?:\\.|[^"\\])*)/u;
 function getPartialJsonEditPath(args: EditRenderArgs): string | undefined {
 	const partialJson = args.__partialJson;
 	if (!partialJson) return undefined;
-	const match = PARTIAL_JSON_PATH_RE.exec(partialJson);
+	const match = PARTIAL_JSON_PATH_RE.exec(stripEditReason(partialJson));
 	return match ? decodePartialJsonStringFragment(match[1]!) : undefined;
 }
 
@@ -401,12 +412,12 @@ function renderEditHeader(
  */
 function renderInlineEditRow(
 	uiTheme: Theme,
-	opts: { op?: Operation; rename?: string; rawPath: string; linkPath?: string; pending: boolean },
+	opts: { op?: Operation; rename?: string; rawPath: string; linkPath?: string; pending: boolean; reason?: string },
 ): Component {
 	const isDelete = opts.op === "delete";
 	return new WidthAwareText(
-		width =>
-			renderEditHeader(width, uiTheme, {
+		width => {
+			const header = renderEditHeader(width, uiTheme, {
 				icon: opts.pending ? "pending" : undefined,
 				iconOverride: opts.pending
 					? undefined
@@ -416,7 +427,9 @@ function renderInlineEditRow(
 				rawPath: opts.rawPath,
 				rename: opts.rename,
 				linkPath: opts.linkPath,
-			}),
+			});
+			return opts.reason ? `${header}\n${renderEditReason(opts.reason, width, uiTheme)}` : header;
+		},
 		0,
 		0,
 	);
@@ -669,6 +682,7 @@ const HL_LINE_OP_HEADER = /^(?:PUT|CUT)\b/;
  * preview can label a delete/move before the payload finishes streaming.
  */
 function getHashlineInputSections(input: string): HashlineInputEntry[] {
+	input = stripEditReason(input);
 	const stripped = input.startsWith("\uFEFF") ? input.slice(1) : input;
 	const entries: HashlineInputEntry[] = [];
 	let current: HashlineInputEntry | undefined;
@@ -695,6 +709,7 @@ function getHashlineInputSections(input: string): HashlineInputEntry[] {
 
 /** Extract display targets using the existing parsers for supported freeform edit modes. */
 export function getEditInputPaths(input: string, resolvedMode?: EditMode): readonly string[] {
+	input = stripEditReason(input);
 	const mode =
 		resolvedMode ??
 		(/^\*\*\* (?:Add|Update|Delete) File:/m.test(input)
@@ -734,6 +749,9 @@ function getHashlineInputRenderSummary(
  * for as long as `input` is unchanged.
  */
 function inspectInputEntries(args: EditRenderArgs, mode: EditMode, input: string): InspectedInputEntry[] {
+	const payload = stripEditReason(input);
+	if (!payload && payload !== input) return [];
+	input = payload;
 	const cached = args[kInspectedInput];
 	if (cached && cached.mode === mode && cached.input === input) {
 		if (cached.entries) return cached.entries;
@@ -884,7 +902,9 @@ function resolveEditCallFacts(
 	editMode: EditMode | undefined,
 ): EditCallFacts {
 	const cached = lastFactsCache;
-	if (cached !== undefined && isPartial && cached.isPartial && cached.editMode === editMode) {
+	// A reason may arrive before any patch target. Do not let that empty
+	// header delay discovery of the first file under the payload growth gate.
+	if (cached !== undefined && cached.facts.rawPath && isPartial && cached.isPartial && cached.editMode === editMode) {
 		if (cached.editArgs === editArgs) {
 			const length = editFactsInputLength(editArgs);
 			// Same args object, still growing gradually: reuse. A rewind
@@ -1083,11 +1103,12 @@ export const editToolRenderer = {
 		const editMode = (context.renderContext as EditRenderContext | undefined)?.editMode;
 		const facts = resolveEditCallFacts(editArgs, context.isPartial, editMode);
 		const label = getOperationTitle(facts.op);
-		if (!facts.rawPath) return { label };
+		const reason = getDisplayEditReason(editArgs);
+		if (!facts.rawPath) return { label, ...(reason ? { detail: reason } : {}) };
 		let detail = formatEditTitlePath(facts.rawPath);
 		if (facts.rename) detail += ` → ${formatEditTitlePath(facts.rename)}`;
 		if (facts.fileCount > 1) detail += ` (+${facts.fileCount - 1} more)`;
-		return { label, detail };
+		return { label, detail: reason ? `${reason} · ${detail}` : detail };
 	},
 
 	renderCall(
@@ -1097,6 +1118,7 @@ export const editToolRenderer = {
 	): Component {
 		const renderContext = options.renderContext;
 		const editArgs = args as EditRenderArgs;
+		const reason = getDisplayEditReason(editArgs);
 		const { rawPath, rename, op, fileCount, applyPatchError, hasHashlineLineEdits } = resolveEditCallFacts(
 			editArgs,
 			options.isPartial,
@@ -1107,7 +1129,7 @@ export const editToolRenderer = {
 		// shared hourglass instead of the eraser/move glyph.
 		const hasPayload = hasEditCallPayload(editArgs, renderContext) || hasHashlineLineEdits;
 		if (fileCount <= 1 && !applyPatchError && (op === "delete" || (rename !== undefined && !hasPayload))) {
-			return renderInlineEditRow(uiTheme, { op, rename, rawPath, pending: true });
+			return renderInlineEditRow(uiTheme, { op, rename, rawPath, pending: true, reason });
 		}
 		const callPreviewCaches: RenderedStringCache[] = [];
 		return framedToolCard(uiTheme, ({ width }) => {
@@ -1137,6 +1159,7 @@ export const editToolRenderer = {
 			}
 			const bodyLines = body ? body.split("\n") : [];
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
+			if (reason) bodyLines.unshift(renderEditReason(reason, width - 2, uiTheme));
 			return {
 				header,
 				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
@@ -1158,6 +1181,7 @@ export const editToolRenderer = {
 			renderContext?.editMode,
 		);
 		const body: NativeChild[] = [];
+		const reason = getDisplayEditReason(args);
 		let tool: NativeToolHead;
 		const multi = renderContext?.perFileDiffPreview;
 		if (multi && multi.length > 1 && multi.some(p => p.diff || p.error)) {
@@ -1175,7 +1199,7 @@ export const editToolRenderer = {
 					),
 				);
 			}
-			tool = editToolHead({ op, files: Math.max(fileCount, multi.length), added, removed });
+			tool = editToolHead({ op, files: Math.max(fileCount, multi.length), added, removed, reason });
 		} else {
 			let diffText: string | undefined;
 			let firstChangedLine: number | undefined;
@@ -1196,6 +1220,7 @@ export const editToolRenderer = {
 			const stats = diffText ? getDiffStats(diffText) : undefined;
 			tool = editToolHead({
 				op,
+				reason,
 				path: rawPath,
 				files: fileCount,
 				line: firstChangedLine,
@@ -1214,6 +1239,7 @@ export const editToolRenderer = {
 		args?: EditRenderArgs,
 	): NativeToolView {
 		const edits = Array.isArray(args?.edits) ? args.edits : undefined;
+		const reason = getDisplayEditReason(args);
 		const perFileResults = result.details?.perFileResults;
 		const totalFiles = edits ? countEditFiles(edits) : 0;
 		if (perFileResults && (perFileResults.length > 1 || totalFiles > 1)) {
@@ -1240,6 +1266,7 @@ export const editToolRenderer = {
 			const failed = perFileResults.some(file => file.isError);
 			return {
 				tool: editToolHead({
+					reason,
 					files: Math.max(totalFiles, perFileResults.length),
 					added,
 					removed,
@@ -1251,7 +1278,12 @@ export const editToolRenderer = {
 		}
 		const file = editFileParts(result, options, args);
 		return {
-			tool: editToolHead({ ...file, href: fileHref(file.resolvedPath), diagnostics: [file.fileDiagnostics] }),
+			tool: editToolHead({
+				...file,
+				href: fileHref(file.resolvedPath),
+				diagnostics: [file.fileDiagnostics],
+				reason,
+			}),
 			body: file.body,
 			tone: file.isError ? "error" : undefined,
 		};
@@ -1267,7 +1299,7 @@ export const editToolRenderer = {
 		const perFileResults = result.details?.perFileResults;
 		const totalFiles = edits ? countEditFiles(edits) : 0;
 		if (perFileResults && (perFileResults.length > 1 || totalFiles > 1)) {
-			return renderMultiFileResult(perFileResults, totalFiles, options, uiTheme);
+			return renderMultiFileResult(perFileResults, totalFiles, options, uiTheme, getDisplayEditReason(args));
 		}
 		return renderSingleFileResult(result, options, uiTheme, args);
 	},
@@ -1275,6 +1307,7 @@ export const editToolRenderer = {
 
 /** Facts behind a native edit head: one file (path, first changed line, rename) or a file count. */
 interface EditHeadFacts {
+	reason?: string;
 	op?: Operation;
 	path?: string;
 	/** Distinct files in the call; more than one heads the call as `N files`. */
@@ -1304,7 +1337,7 @@ function editToolHead(facts: EditHeadFacts): NativeToolHead {
 			? `${displayPath(facts.path)}${facts.line ? `:${facts.line}` : ""}`
 			: undefined;
 	return {
-		title: multi ? "Edit" : getOperationTitle(facts.op),
+		title: `${multi ? "Edit" : getOperationTitle(facts.op)}${facts.reason ? ` · ${facts.reason}` : ""}`,
 		target,
 		targetKind: multi ? "text" : "path",
 		href: multi ? undefined : facts.href,
@@ -1406,6 +1439,7 @@ function renderSingleFileResult(
 	args?: EditRenderArgs,
 ): Component {
 	const details = result.details;
+	const reason = getDisplayEditReason(args);
 	const isError = result.isError ?? (details && "isError" in details ? details.isError : false);
 	const edits = Array.isArray(args?.edits) ? args.edits : undefined;
 	const firstEdit = edits?.[0];
@@ -1441,7 +1475,7 @@ function renderSingleFileResult(
 	// diagnostics keep the framed block below.
 	if (!isError && !details?.diff && !details?.diagnostics && (op === "delete" || rename)) {
 		const linkPath = details && "path" in details ? details.path : undefined;
-		return renderInlineEditRow(uiTheme, { op, rename, rawPath, linkPath, pending: false });
+		return renderInlineEditRow(uiTheme, { op, rename, rawPath, linkPath, pending: false, reason });
 	}
 
 	const renderFallbackDiff = (diffText: string, diffOptions?: { filePath?: string }): string =>
@@ -1540,6 +1574,7 @@ function renderSingleFileResult(
 		// use a flush left border because code-frame gutters already provide padding.
 		const bodyLines = body.length > 0 ? body.split("\n").flatMap(line => wrapEditRendererLine(line, innerWidth)) : [];
 		while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
+		if (reason) bodyLines.unshift(renderEditReason(reason, innerWidth, uiTheme));
 
 		return {
 			header,
@@ -1556,6 +1591,7 @@ function renderMultiFileResult(
 	totalFiles: number,
 	options: RenderResultOptions & { renderContext?: EditRenderContext },
 	uiTheme: Theme,
+	reason?: string,
 ): Component {
 	const fileComponents = perFileResults.map(fileResult =>
 		renderSingleFileResult({ content: [], details: fileResult, isError: fileResult.isError }, options, uiTheme),
@@ -1570,6 +1606,7 @@ function renderMultiFileResult(
 			if (cached?.key === key) return cached.lines;
 
 			const allLines: string[] = [];
+			if (reason) allLines.push(renderEditReason(reason, width, uiTheme));
 			for (let i = 0; i < fileComponents.length; i++) {
 				if (i > 0) {
 					allLines.push("");

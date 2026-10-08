@@ -71,9 +71,13 @@ describe("streamed edit revisions", () => {
 			const tool = new EditTool(toolSession, "hashline");
 			const tag = getEditStore(toolSession).recordSnapshot(filePath, initial);
 			const header = formatHashlineHeader("sample.jl", tag);
-			const original = { input: `${header}\nPUT 1-1:\n+value = condition ? left : right` };
+			const original = {
+				title: "Keep the original branch",
+				input: `*** Reason: Preserve compact branching\n${header}\nPUT 1-1:\n+value = condition ? left : right`,
+			};
 			const revised = {
-				input: `${header}\nPUT 1-1:\n+value = if condition\n+    left\n+else\n+    right\n+end`,
+				title: "Use explicit branching",
+				input: `*** Reason: Make branches easier to read\n${header}\nPUT 1-1:\n+value = if condition\n+    left\n+else\n+    right\n+end`,
 			};
 			const stream = tool.openArgStream({
 				toolCallId: "revised-edit",
@@ -88,6 +92,98 @@ describe("streamed edit revisions", () => {
 
 			expect(result.isError).not.toBe(true);
 			expect(await Bun.file(filePath).text()).toBe("value = if condition\n    left\nelse\n    right\nend\n");
+		} finally {
+			await removeWithRetries(cwd);
+		}
+	});
+});
+
+describe("streamed edit reasons", () => {
+	for (const mode of ["hashline", "apply_patch"] as const) {
+		test(`${mode} previews and applies a reason-prefixed edit across every character boundary`, async () => {
+			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "stream-reason-"));
+			try {
+				const filePath = path.join(cwd, "sample.txt");
+				const initial = "before\n";
+				await Bun.write(filePath, initial);
+				const toolSession = {
+					cwd,
+					hasUI: false,
+					getSessionFile: () => null,
+					getSessionSpawns: () => "*",
+					enableLsp: false,
+					settings: Settings.isolated({ "edit.mode": mode }),
+					getArtifactsDir: () => null,
+					getSessionId: () => null,
+					getPlanModeState: () => undefined,
+				} as unknown as ToolSession;
+				const tool = new EditTool(toolSession, mode);
+				const tag = getEditStore(toolSession).recordSnapshot(filePath, initial);
+				const patch =
+					mode === "hashline"
+						? `*** Begin Patch\n${formatHashlineHeader("sample.txt", tag)}\nPUT 1.=1:\n+after\n*** End Patch\n`
+						: "*** Begin Patch\n*** Update File: sample.txt\n@@\n-before\n+after\n*** End Patch\n";
+				const reason = "*** Reason: 誤った値を修正する\n";
+				const args = { title: "値の整合性を保つ", input: reason + patch };
+				const finalPreview = Promise.withResolvers<{ diff?: string; error?: string } | undefined>();
+				const stream = tool.openArgStream({
+					toolCallId: "reason-edit",
+					toolName: "edit",
+					customWireName: mode === "hashline" ? "edit" : undefined,
+					emit: update => {
+						if (update && typeof update === "object" && "streaming" in update && update.streaming === false) {
+							const files = "files" in update && Array.isArray(update.files) ? update.files : [];
+							finalPreview.resolve(files[0] as { diff?: string; error?: string } | undefined);
+						}
+					},
+				});
+				const encoded =
+					mode === "hashline"
+						? args.input
+						: JSON.stringify(args).replace("*** Reason:", "\\u002a** Reason:").replace("\\n", "\\u000a");
+				for (const char of encoded) stream.push(char);
+				stream.end(args);
+				const preview = await finalPreview.promise;
+				expect(preview?.error).toBeUndefined();
+				expect(preview?.diff).toContain("+1|after");
+				expect(tool.matcherPaths(args)).toEqual(["sample.txt"]);
+				expect(tool.formatApprovalDetails(args)).toEqual(["File: sample.txt"]);
+				const result = await tool.execute("reason-edit", args);
+				expect(result.isError).not.toBe(true);
+				expect(await Bun.file(filePath).text()).toBe("after\n");
+			} finally {
+				await removeWithRetries(cwd);
+			}
+		});
+	}
+
+	test("a reason-only call has no targets, while a completed sloppy edit keeps reason-like file content", async () => {
+		const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "reason-only-"));
+		try {
+			const filePath = path.join(cwd, "sample.txt");
+			await Bun.write(filePath, "before\n");
+			const toolSession = {
+				cwd,
+				hasUI: false,
+				getSessionFile: () => null,
+				getSessionSpawns: () => "*",
+				getArtifactsDir: () => null,
+				getSessionId: () => null,
+				enableLsp: false,
+				settings: Settings.isolated({ "edit.mode": "sloppy" }),
+				getPlanModeState: () => undefined,
+			} as unknown as ToolSession;
+			const tool = new EditTool(toolSession, "sloppy");
+			const args = { input: "*** Reason: *** Edit File: sample.txt" };
+			expect(tool.matcherPaths(args)).toBeUndefined();
+			const result = await tool.execute("reason-only", args);
+			expect(result.isError).toBe(true);
+			expect(await Bun.file(filePath).text()).toBe("before\n");
+			const completed = await tool.execute("complete-reason", {
+				input: "*** Reason: Preserve a literal marker\n*** Edit File: sample.txt\n*** Find\nbefore\n*** Replace\n*** Reason: literal file content\n",
+			});
+			expect(completed.isError).not.toBe(true);
+			expect(await Bun.file(filePath).text()).toBe("*** Reason: literal file content\n");
 		} finally {
 			await removeWithRetries(cwd);
 		}

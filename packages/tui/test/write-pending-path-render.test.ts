@@ -17,6 +17,45 @@ afterEach(() => {
 });
 
 describe("pending write path rendering", () => {
+	it("keeps an untrusted purpose on one bounded row through write progress and failure", async () => {
+		await themeModule.initTheme();
+		const uiTheme = (await themeModule.getThemeByName("dark")) ?? (await themeModule.getThemeByName("light"));
+		if (!uiTheme) throw new Error("expected an initialized theme");
+		const args = {
+			path: "config.ts",
+			content: "export const retries = 3;\n",
+			i: `設定を統一\nするため\t\x1b[2J\x07${"説明".repeat(50)}`,
+		};
+		const options = { expanded: false, isPartial: true };
+		const components = [
+			writeToolRenderer.renderCall(args, options, uiTheme),
+			writeToolRenderer.renderResult({ content: [{ type: "text", text: "Writing..." }] }, options, uiTheme, args),
+			writeToolRenderer.renderResult({ content: [] }, { ...options, isPartial: false }, uiTheme, args),
+			writeToolRenderer.renderResult(
+				{ content: [{ type: "text", text: "Disk full" }], isError: true },
+				{ ...options, isPartial: false },
+				uiTheme,
+				args,
+			),
+		];
+		for (const component of components) {
+			if (!component) throw new Error("expected a file write card");
+			for (const width of [40, 80]) {
+				const lines = component.render(width);
+				const plain = lines.map(line => Bun.stripANSI(line));
+				expect(plain.filter(line => line.includes("設定を統一 するため"))).toHaveLength(1);
+				expect(plain.join("\n")).toContain("config.ts");
+				expect(lines.join("\n")).not.toContain("\x1b[2J");
+				expect(plain.join("\n")).not.toMatch(/[\x07\t]/);
+				for (const line of lines) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(width);
+			}
+		}
+		const routedArgs = { path: "proc://worker", content: "continue" };
+		expect(writeToolRenderer.activitySummary({ ...routedArgs, i: args.i }, options)).toEqual(
+			writeToolRenderer.activitySummary(routedArgs, options),
+		);
+	});
+
 	it("links a relative path before the write result exists", async () => {
 		applyHyperlinkSetting("always");
 		await themeModule.initTheme();

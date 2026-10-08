@@ -44,7 +44,11 @@ import { ToolExecutionComponent, type ToolExecutionHandle, toolRenderName } from
 import { TranscriptBlock, TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import { createUsageRowBlock, turnElapsedMs } from "@oh-my-pi/pi-tui/overlays/usage-row";
 import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
-import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
+import {
+	decodeStreamedToolArgs,
+	streamingStringKeysForTool,
+	withWriteIntent,
+} from "../../modes/controllers/tool-args-reveal";
 import {
 	materializeImageReferenceLinks,
 	materializeImageReferenceLinksSync,
@@ -695,7 +699,7 @@ export class UiHelpers {
 						: content.arguments;
 					const component = new ToolExecutionComponent(
 						renderToolName,
-						renderArgs,
+						renderToolName === "write" ? withWriteIntent(renderArgs, content.intent) : renderArgs,
 						{
 							useBuiltInRenderer: this.ctx.viewSession.hasBuiltInTool(renderToolName),
 							showImages: cfgTerminalShowImages.get(settings),

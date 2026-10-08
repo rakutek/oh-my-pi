@@ -55,7 +55,7 @@ import {
 } from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
 import { isWarpCliAgentProtocolActive } from "../warp-events";
 import { StreamingRevealController } from "./streaming-reveal";
-import { streamingStringKeysForTool, ToolArgsRevealController } from "./tool-args-reveal";
+import { streamingStringKeysForTool, ToolArgsRevealController, withWriteIntent } from "./tool-args-reveal";
 
 import {
 	cfgCompletionNotify,
@@ -1840,6 +1840,7 @@ export class EventController {
 		this.#updateWorkingMessageFromIntent(event.intent);
 		const tool = this.ctx.viewSession.getToolByName(event.toolName);
 		const renderToolName = toolRenderName(event.toolName, tool);
+		const renderArgs = renderToolName === "write" ? withWriteIntent(event.args, event.intent) : event.args;
 		if (renderToolName === "ask" || this.#toolWillPromptForApproval(renderToolName, event.args)) {
 			this.#approvalAttentionToolCallIds.add(event.toolCallId);
 			setTerminalTitleState("attention");
@@ -1871,7 +1872,7 @@ export class EventController {
 			this.#resetReadGroup();
 			const component = new ToolExecutionComponent(
 				renderToolName,
-				event.args,
+				renderArgs,
 				{
 					useBuiltInRenderer: this.ctx.viewSession.hasBuiltInTool(renderToolName),
 					showImages: cfgTerminalShowImages.get(settings),
@@ -1909,7 +1910,7 @@ export class EventController {
 			this.#toolArgsReveal.finish(event.toolCallId);
 			const component = this.ctx.pendingTools.get(event.toolCallId);
 			if (component && typeof component.updateArgs === "function") {
-				component.updateArgs(event.args, event.toolCallId);
+				component.updateArgs(renderArgs, event.toolCallId);
 				if (typeof component.setArgsComplete === "function") {
 					component.setArgsComplete(event.toolCallId);
 				}

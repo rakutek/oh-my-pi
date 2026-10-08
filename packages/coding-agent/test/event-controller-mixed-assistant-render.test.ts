@@ -288,6 +288,67 @@ describe("EventController mixed assistant text/tool rendering", () => {
 		expect(toolCall.name).toBe("xd://github");
 	});
 
+	it("retains a write purpose when execution strips metadata and when the transcript is rebuilt", async () => {
+		const reason = "再試行回数を一元管理するため設定を作成";
+		const args = { path: "config.ts", content: "export const retries = 3;\n" };
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "write-purpose",
+			name: "write",
+			arguments: { i: reason, ...args },
+		};
+		const message = assistantMessage([toolCall]);
+		const live = createFixture();
+		await live.controller.handleEvent({ type: "message_start", message: assistantMessage([]) });
+		await live.controller.handleEvent({
+			type: "message_update",
+			message,
+			assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall, partial: message },
+		});
+		expect(Bun.stripANSI(live.chatContainer.render(120).join("\n"))).toContain(reason);
+
+		const executionOnly = createFixture();
+		for (const fixture of [live, executionOnly]) {
+			await fixture.controller.handleEvent({
+				type: "tool_execution_start",
+				toolCallId: toolCall.id,
+				toolName: "write",
+				args,
+				intent: reason,
+			});
+			expect(Bun.stripANSI(fixture.chatContainer.render(120).join("\n"))).toContain(reason);
+			await fixture.controller.handleEvent({
+				type: "tool_execution_end",
+				toolCallId: toolCall.id,
+				toolName: "write",
+				result: { content: [{ type: "text", text: "Written" }] },
+				isError: false,
+			});
+			const rendered = Bun.stripANSI(fixture.chatContainer.render(120).join("\n"));
+			expect(rendered).toContain(reason);
+			expect(rendered).toContain("retries = 3");
+		}
+
+		// Hooks can persist revised args without the original harness field.
+		const restoredCall = { ...toolCall, arguments: args, intent: reason };
+		const rebuilt = createFixture();
+		const helpers = new UiHelpers(rebuilt.ctx);
+		rebuilt.ctx.addMessageToChat = (entry, options) => helpers.addMessageToChat(entry, options);
+		helpers.renderSessionContext({
+			messages: [assistantMessage([restoredCall])],
+			models: {},
+			injectedTtsrRules: [],
+			mode: "none",
+		});
+		expect(Bun.stripANSI(rebuilt.chatContainer.render(120).join("\n"))).toContain(reason);
+		for (const fixture of [live, executionOnly, rebuilt]) {
+			for (const child of fixture.chatContainer.children) {
+				if (child instanceof ToolExecutionComponent) child.stopAnimation();
+			}
+			fixture.controller.dispose();
+		}
+	});
+
 	it("keeps assistant text streaming while hiding bash failures and grouped read activity", async () => {
 		const { controller, chatContainer } = createFixture(true);
 		const bashCall: ToolCall = {

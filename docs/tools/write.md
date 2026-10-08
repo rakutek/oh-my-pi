@@ -20,10 +20,12 @@
 | --- | --- | --- | --- |
 | `path` | `string` | Yes | Target path. Plain paths write files. Writable internal URLs delegate to their handler. `xd://<device>` dispatches a mounted tool using JSON in `content`. `archive.ext:inner/path` writes an archive entry for `.zip` and ZIP-format aliases (`.jar`, `.war`, `.ear`, `.apk`, …), `.tar`, `.tar.gz`/`.tgz`, `.tar.zst`/`.tzst`, or `.asar`. `db.sqlite:table` inserts a row; `db.sqlite:table:key` updates/deletes one. `conflict://<id>` resolves a registered conflict and `conflict://*` performs a bulk resolution. A copied `[path#TAG]` wrapper is accepted and removed. |
 | `content` | `string` | Except `proc://<id>/kill` | Full replacement file/archive/internal-resource content, conflict replacement, or SQLite row payload. Ignored for `/kill`. SQLite non-delete writes must parse as a JSON5 object; empty or whitespace-only content deletes a keyed row. For `xd://`, this is the mounted tool's JSON argument object. |
+| `i` | `string` | Harness-managed | With intent tracing enabled, the agent supplies a concise purpose in the user's language: why the file is being created or replaced. This display metadata is separated from the arguments passed to `WriteTool.execute()` and is never written into `content`. |
 
 Worked examples:
 
 ```text
+i: "Keep retry limits in one shared configuration file"
 path: "src/config.json"
 content: "{\n  \"enabled\": true\n}\n"
 ```
@@ -37,6 +39,8 @@ content: "hello\n"
 path: "data/app.sqlite:users:42"
 content: "{name: 'Ada', active: true}"
 ```
+
+File-write cards show the purpose above the content preview during streaming, progress, completion, and errors; compact activity rows show it before the target path. Execution events and rebuilt transcripts retain the purpose even when it is stored separately from the tool arguments. Calls without a purpose keep the existing layout. Routed tool-device, process, agent, and configuration writes keep their specialized renderers.
 
 ## Outputs
 Single-shot result.

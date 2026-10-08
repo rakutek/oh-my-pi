@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { HighlightStream } from "@oh-my-pi/pi-natives";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
 import type { Component } from "../tui";
 import { fencedCode } from "../components/markdown";
 import { Text } from "../components/text";
@@ -32,7 +33,7 @@ import {
 	type ProcWriteAction,
 	type ProcWriteDetails,
 } from "./proc-render";
-import type { TspTone } from "@oh-my-pi/pi-wire";
+import { INTENT_FIELD, type TspTone } from "@oh-my-pi/pi-wire";
 import { code, compact, md, node, span } from "../native/describe";
 import type { NativeChild, NativeNode } from "../native/node";
 import { diagnosticsBadge, diagnosticsSection, displayPath, errorText, fileHref, resultText } from "./native-view";
@@ -85,9 +86,19 @@ export interface WriteToolDetails {
 }
 
 interface WriteRenderArgs {
+	[INTENT_FIELD]?: unknown;
 	path?: unknown;
 	file_path?: unknown;
 	content?: unknown;
+}
+
+function getDisplayWriteReason(args: WriteRenderArgs | undefined): string | undefined {
+	const intent = args?.[INTENT_FIELD];
+	return typeof intent === "string" ? sanitizeText(intent).replace(/\s+/g, " ").trim() || undefined : undefined;
+}
+
+function renderWriteReason(reason: string, width: number, uiTheme: Theme): string {
+	return uiTheme.fg("toolTitle", truncateToWidth(reason, Math.max(1, width)));
 }
 
 const WRITE_PREVIEW_LINES = 6;
@@ -580,7 +591,9 @@ export const writeToolRenderer = {
 			const resolveMounted = (context.renderContext as WriteRenderContext | undefined)?.resolveXdevMounted;
 			return xdevActivitySummary(xdev.name, writeArgs.content, resolveMounted);
 		}
-		return { label: "Write", detail: shortenPath(rawPath) };
+		const reason = getDisplayWriteReason(writeArgs);
+		const target = shortenPath(rawPath);
+		return { label: "Write", detail: reason ? `${reason} · ${target}` : target };
 	},
 
 	renderCall(
@@ -636,8 +649,9 @@ export const writeToolRenderer = {
 		// cost formatStreamingContent avoids. Non-string content still falls
 		// back to the normalizing stringify.
 		const content = typeof args.content === "string" ? args.content : normalizeDisplayText(args.content);
+		const reason = getDisplayWriteReason(args);
 		const streamingCache = createRenderedStringCache();
-		return framedToolCard(uiTheme, () => {
+		return framedToolCard(uiTheme, ({ contentWidth }) => {
 			const body = content
 				? formatStreamingContent(
 						content,
@@ -656,6 +670,7 @@ export const writeToolRenderer = {
 				: "";
 			const bodyLines = body ? body.split("\n") : [];
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
+			if (reason) bodyLines.unshift(renderWriteReason(reason, contentWidth, uiTheme));
 			return {
 				header,
 				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
@@ -696,6 +711,7 @@ export const writeToolRenderer = {
 		const linkTarget = result.details?.resolvedPath;
 		const styledPath = filePath ? uiTheme.fg("accent", filePath) : uiTheme.fg("toolOutput", "…");
 		const pathDisplay = filePath && linkTarget ? fileHyperlink(linkTarget, styledPath) : styledPath;
+		const reason = getDisplayWriteReason(args);
 
 		if (result.isError) {
 			const errorText = result.content?.find(c => c.type === "text")?.text ?? "";
@@ -703,12 +719,16 @@ export const writeToolRenderer = {
 				{ icon: "error", title: "Write", description: `${langIcon} ${pathDisplay}` },
 				uiTheme,
 			);
-			return framedToolCard(uiTheme, () => ({
-				header,
-				sections: [{ content: formatErrorDetail(errorText, uiTheme).split("\n") }],
-				phase: "error",
-				borderColor: "error",
-			}));
+			return framedToolCard(uiTheme, ({ contentWidth }) => {
+				const bodyLines = formatErrorDetail(errorText, uiTheme).split("\n");
+				if (reason) bodyLines.unshift(renderWriteReason(reason, contentWidth, uiTheme));
+				return {
+					header,
+					sections: [{ content: bodyLines }],
+					phase: "error",
+					borderColor: "error",
+				};
+			});
 		}
 
 		const isPartial = options.isPartial === true;
@@ -732,7 +752,7 @@ export const writeToolRenderer = {
 		const diagnostics = result.details?.diagnostics;
 
 		const previewCache = createRenderedStringCache();
-		return framedToolCard(uiTheme, () => {
+		return framedToolCard(uiTheme, ({ contentWidth }) => {
 			const { expanded } = options;
 			let body = renderContentPreview(fileContent, expanded, lang, uiTheme, previewCache);
 			if (isPartial && progressText) {
@@ -755,6 +775,7 @@ export const writeToolRenderer = {
 			}
 			const bodyLines = body.split("\n");
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
+			if (reason) bodyLines.unshift(renderWriteReason(reason, contentWidth, uiTheme));
 			return {
 				header,
 				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],

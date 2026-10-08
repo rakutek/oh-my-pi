@@ -179,10 +179,12 @@ export const fsFixtures: Record<string, GalleryFixture> = {
 		label: "Write",
 		// Streaming: path known, content still arriving (only the imports so far).
 		streamingArgs: {
+			i: "Prevent line-range parsing regressions with focused coverage",
 			path: "packages/coding-agent/test/parse-sel.test.ts",
 			content: 'import { describe, expect, it } from "bun:test";\nimport { parseSel } from "../src/tools/read";\n',
 		},
 		args: {
+			i: "Prevent line-range parsing regressions with focused coverage",
 			path: "packages/coding-agent/test/parse-sel.test.ts",
 			content: writtenContent,
 		},

@@ -5,6 +5,7 @@
 ### Added
 
 - Edit calls can explain why a change is needed using a JSON `title` or a leading `*** Reason:` line in freeform patches, shown during editing and in the resulting diff.
+- File writes show why a file is being created or replaced using the existing `i` intent, retained through execution and transcript restoration.
 
 ### Fixed
 

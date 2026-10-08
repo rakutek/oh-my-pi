@@ -5,6 +5,7 @@
 ### Added
 
 - Edit cards and compact activity rows show the supplied change reason across streaming, completion, errors, and native views.
+- File-write cards and compact activity rows display the supplied purpose during streaming, completion, and errors.
 
 ## [18.8.4] - 2026-10-08
 

@@ -1,5 +1,11 @@
 import type { Component } from "@oh-my-pi/pi-tui";
-import { parseStreamingJson, parseStreamingJsonThrottled, STREAMING_JSON_PARSE_MIN_GROWTH } from "@oh-my-pi/pi-utils";
+import {
+	isRecord,
+	parseStreamingJson,
+	parseStreamingJsonThrottled,
+	STREAMING_JSON_PARSE_MIN_GROWTH,
+} from "@oh-my-pi/pi-utils";
+import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { nextStep, STREAMING_REVEAL_FRAME_MS } from "./streaming-reveal";
 
 /** Minimal component surface the reveal pushes frames into. */
@@ -15,7 +21,7 @@ type ToolArgsRevealComponent = Component & {
 const STREAMING_STRING_KEYS_BY_TOOL: Record<string, readonly string[]> = {
 	// write.content also carries xd:// device args (a JSON string) — the same
 	// incremental decode feeds the delegated tool renderer live inner args.
-	write: ["content"],
+	write: ["i", "content"],
 	edit: ["title", "input", "_input"],
 	eval: ["code"],
 };
@@ -24,6 +30,12 @@ const STREAMING_STRING_KEYS_BY_TOOL: Record<string, readonly string[]> = {
 export function streamingStringKeysForTool(toolName: string, rawInput: boolean): readonly string[] | undefined {
 	if (rawInput) return undefined;
 	return STREAMING_STRING_KEYS_BY_TOOL[toolName];
+}
+
+/** Execution args omit harness metadata; retain the write purpose in live and rebuilt cards. */
+export function withWriteIntent(args: unknown, intent: string | undefined): unknown {
+	if (!intent || !isRecord(args) || INTENT_FIELD in args) return args;
+	return { ...args, [INTENT_FIELD]: intent };
 }
 
 type ToolArgsRevealControllerOptions = {

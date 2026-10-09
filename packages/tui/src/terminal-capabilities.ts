@@ -10,7 +10,12 @@ import {
 	renderKittyPlaceholderLines,
 	setKittyGraphics,
 } from "./kitty-graphics";
-import { isInsideHerdr, isInsideTerminalMultiplexer } from "./terminal-multiplexer";
+import {
+	herdrRendersKittyGraphics,
+	isInsideHerdr,
+	isInsideTerminalMultiplexer,
+	parseMajorMinorVersion,
+} from "./terminal-multiplexer";
 import { isInsideTmux, resolveTmuxClientTerminalName, wrapTmuxPassthrough, wrapTmuxPassthroughIfNeeded } from "./tmux";
 import type { HangulCompatibilityJamoWidth } from "./utils";
 
@@ -317,16 +322,6 @@ function getForcedImageProtocol(): ImageProtocol | null | undefined {
  */
 export function isImageProtocolForced(): boolean {
 	return getForcedImageProtocol() !== undefined;
-}
-
-function parseMajorMinorVersion(versionRaw?: string): { major: number; minor: number } | null {
-	if (!versionRaw) return null;
-	const match = /^(\d+)\.(\d+)/u.exec(versionRaw.trim());
-	if (!match) return null;
-	const major = Number.parseInt(match[1] ?? "", 10);
-	const minor = Number.parseInt(match[2] ?? "", 10);
-	if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
-	return { major, minor };
 }
 
 /**
@@ -647,14 +642,13 @@ export function resolveImageProtocol(
 	// applied after the multiplexer fallback so tmux/screen inside a Paseo
 	// pane cannot restore Kitty via getFallbackImageProtocol
 	// (getpaseo/paseo#3850).
-	if (imageProtocol !== null && isPaseoEmbedder(env)) {
+	if (isPaseoEmbedder(env)) {
 		return null;
 	}
-	// Herdr owns the pane grid but does not expose whether the attached client
-	// enabled its experimental Kitty renderer. Outer-terminal identity variables
-	// can leak into the pane, so only the explicit protocol override is safe.
-	if (imageProtocol !== null && isInsideHerdr(env)) {
-		return null;
+	// Herdr owns the pane grid, and outer-terminal identity variables can leak
+	// into the pane. Only Herdr's own release marker proves its Kitty renderer.
+	if (isInsideHerdr(env)) {
+		return herdrRendersKittyGraphics(env) ? ImageProtocol.Kitty : null;
 	}
 	return imageProtocol;
 }

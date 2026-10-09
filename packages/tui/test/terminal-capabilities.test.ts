@@ -482,6 +482,26 @@ describe("Herdr image protocol mask", () => {
 		expect(terminalId).toBe("ghostty");
 		expect(resolveImageProtocol(terminalId, env, true)).toBeNull();
 	});
+
+	it("uses Kitty in Herdr 0.9+ panes regardless of the leaked outer identity", () => {
+		const pane = { COLORTERM: "truecolor", HERDR_ENV: "1", TERM: "xterm-256color", TERM_PROGRAM: "herdr" };
+		const current = { ...pane, TERM_PROGRAM_VERSION: "0.9.3" };
+		expect(resolveImageProtocol(detectTerminalId(current), current, true)).toBe(ImageProtocol.Kitty);
+		const leaked = { ...current, GHOSTTY_RESOURCES_DIR: "/usr/share/ghostty" };
+		expect(resolveImageProtocol(detectTerminalId(leaked), leaked, true)).toBe(ImageProtocol.Kitty);
+		// Pre-0.9 Herdr rendered pane images only behind an opt-in setting.
+		const old = { ...pane, TERM_PROGRAM_VERSION: "0.8.2", GHOSTTY_RESOURCES_DIR: "/usr/share/ghostty" };
+		expect(resolveImageProtocol(detectTerminalId(old), old, true)).toBeNull();
+		const unversioned = { ...pane, GHOSTTY_RESOURCES_DIR: "/usr/share/ghostty" };
+		expect(resolveImageProtocol(detectTerminalId(unversioned), unversioned, true)).toBeNull();
+	});
+
+	it("keeps tmux and screen nested in a Herdr 0.9+ pane off", () => {
+		const pane = { HERDR_ENV: "1", TERM_PROGRAM: "herdr", TERM_PROGRAM_VERSION: "0.9.3" };
+		expect(resolveImageProtocol("trueColor", { ...pane, STY: "1234.pts-0.host" }, true)).toBeNull();
+		const tmux = { ...pane, TMUX: "/tmp/tmux-1000/default,1,0", TERM: "tmux-256color" };
+		expect(resolveImageProtocol("base", tmux, true)).toBeNull();
+	});
 });
 
 describe("Paseo embedder carve-out", () => {

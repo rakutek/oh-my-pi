@@ -7,6 +7,10 @@
 - Edit cards and compact activity rows show the supplied change reason across streaming, completion, errors, and native views.
 - File-write cards and compact activity rows display the supplied purpose during streaming, completion, and errors.
 
+### Fixed
+
+- Fixed inline images not appearing in Herdr 0.9+ panes unless `PI_FORCE_IMAGE_PROTOCOL=kitty` was set; with Herdr's `terminal.kitty_graphics` disabled, set `PI_FORCE_IMAGE_PROTOCOL=none`.
+
 ## [18.8.4] - 2026-10-08
 
 ### Changed

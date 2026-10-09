@@ -132,6 +132,20 @@ describe("detectKittyUnicodePlaceholdersSupport", () => {
 		expect(detectKittyUnicodePlaceholdersSupport("ghostty", { ...paneOnly, PI_KITTY_PLACEHOLDERS: "1" })).toBe(true);
 	});
 
+	it("uses placeholders in Herdr 0.9+ panes, which render U=1 cells themselves", () => {
+		const pane = env({ HERDR_ENV: "1", TERM_PROGRAM: "herdr", GHOSTTY_RESOURCES_DIR: "/usr/share/ghostty" });
+		expect(detectKittyUnicodePlaceholdersSupport("ghostty", { ...pane, TERM_PROGRAM_VERSION: "0.9.3" })).toBe(true);
+		expect(detectKittyUnicodePlaceholdersSupport("trueColor", { ...pane, TERM_PROGRAM_VERSION: "1.0.0" })).toBe(true);
+		expect(detectKittyUnicodePlaceholdersSupport("ghostty", { ...pane, TERM_PROGRAM_VERSION: "0.8.2" })).toBe(false);
+		expect(
+			detectKittyUnicodePlaceholdersSupport("ghostty", {
+				...pane,
+				TERM_PROGRAM_VERSION: "0.9.3",
+				PI_KITTY_PLACEHOLDERS: "0",
+			}),
+		).toBe(false);
+	});
+
 	it("honors PI_NO_KITTY_PLACEHOLDERS=1 as a hard off override on supporting terminals", () => {
 		expect(detectKittyUnicodePlaceholdersSupport("kitty", env({ PI_NO_KITTY_PLACEHOLDERS: "1" }))).toBe(false);
 		expect(detectKittyUnicodePlaceholdersSupport("ghostty", env({ PI_NO_KITTY_PLACEHOLDERS: "true" }))).toBe(false);

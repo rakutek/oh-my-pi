@@ -10,6 +10,36 @@ export function isInsideHerdr(env: NodeJS.ProcessEnv = Bun.env): boolean {
 	return false;
 }
 
+/** Parse the leading `major.minor` of a self-reported terminal version (`TERM_PROGRAM_VERSION`). */
+export function parseMajorMinorVersion(versionRaw?: string): { major: number; minor: number } | null {
+	if (!versionRaw) return null;
+	const match = /^(\d+)\.(\d+)/u.exec(versionRaw.trim());
+	if (!match) return null;
+	const major = Number.parseInt(match[1] ?? "", 10);
+	const minor = Number.parseInt(match[2] ?? "", 10);
+	if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
+	return { major, minor };
+}
+
+/**
+ * True when the enclosing Herdr pane renders Kitty graphics, including `U=1`
+ * Unicode placeholders, by default.
+ *
+ * Herdr 0.9.0 enabled `terminal.kitty_graphics` by default and re-emits pane
+ * images to compatible outer terminals itself. Its panes identify the release
+ * through `TERM_PROGRAM=herdr` + `TERM_PROGRAM_VERSION`. Older or unversioned
+ * panes, and screen/tmux nested inside a pane (tmux replaces `TERM_PROGRAM`;
+ * screen cannot carry Kitty APC), stay off. A user-disabled
+ * `terminal.kitty_graphics` is not visible from the pane environment;
+ * `PI_FORCE_IMAGE_PROTOCOL=none` opts out.
+ */
+export function herdrRendersKittyGraphics(env: NodeJS.ProcessEnv = Bun.env): boolean {
+	if (!isInsideHerdr(env) || env.STY || env.TMUX) return false;
+	if (env.TERM_PROGRAM?.trim().toLowerCase() !== "herdr") return false;
+	const version = parseMajorMinorVersion(env.TERM_PROGRAM_VERSION);
+	return version !== null && (version.major > 0 || version.minor >= 9);
+}
+
 /** Terminal multiplexers omp recognizes as owning the screen grid. */
 export type TerminalMultiplexer = "herdr" | "tmux" | "screen" | "zellij" | "cmux" | "wmux";
 
